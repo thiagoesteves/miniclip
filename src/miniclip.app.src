@@ -1,11 +1,14 @@
 {application, miniclip,
  [{description, "An OTP application"},
-  {vsn, "0.1.0"},
+  {vsn, "1.0.0"},
   {registered, []},
   {mod, {miniclip_app, []}},
   {applications,
    [kernel,
-    stdlib
+    stdlib,
+    erlcloud,
+    jsone,
+    inets
    ]},
   {env,[]},
   {modules, []},
