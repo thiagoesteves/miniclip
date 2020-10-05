@@ -8,7 +8,8 @@
     stdlib,
     erlcloud,
     jsone,
-    inets
+    inets,
+    ssl
    ]},
   {env,[]},
   {modules, []},

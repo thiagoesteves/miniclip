@@ -26,6 +26,7 @@
 -export([init/1,
          start_link/0,
          terminate/2,
+         handle_continue/2,
          handle_cast/2,
          handle_info/2,
          handle_call/3,
@@ -38,14 +39,21 @@
 %%% Global Defines
 %%%===================================================================
 
-% DDB2 defines (names, fields, etc)
+%% DDB2 defines (names, fields, etc)
 -define(DDB2_NAME,     <<"TransactionTable">>).
 -define(DDB2_F1,       <<"TransactionID">>).
 -define(DDB2_F2,       <<"UserID">>).
 
-% DDB2 error defines
+%% DDB2 error defines
 -define(DDB2_MSG_ALREADY, <<"Table already exists: ">>).
 -define(DDB2_ERROR_ALREADY, <<?DDB2_MSG_ALREADY/binary, ?DDB2_NAME/binary>>).
+
+%% HTTP defines
+-define(MAX_SESSIONS,     200000).
+-define(PIPELINE_TIMEOUT, 5000).
+
+%% Supervisor that is handling the messages servers
+-define(MSG_SUP, miniclip_msg_sup).
 
 %%%===================================================================
 %%% API
@@ -73,27 +81,36 @@ init([]) ->
   application:set_env(erlcloud, aws_secret_access_key, ?AWS_SECRET_ACCESS_KEY),
   application:set_env(erlcloud, aws_region, ?AWS_REGION),
 
+  %% Config HTTP options
+  ok = httpc:set_options([{max_sessions, ?MAX_SESSIONS},
+                          {pipeline_timeout, ?PIPELINE_TIMEOUT}], default),
+
   %% Create the database (or keep the one that already exist)
   DDB2_ERROR_ALREADY = ?DDB2_ERROR_ALREADY,
-  case erlcloud_ddb2:create_table( ?DDB2_NAME,
-                                   [{?DDB2_F1, s}, {?DDB2_F2, s}],
-                                    {?DDB2_F1, ?DDB2_F2}, 5, 5) of
+  case miniclip_erlcloud:ddb2_create_table( ?DDB2_NAME,
+                                            [{?DDB2_F1, s}, {?DDB2_F2, s}],
+                                            {?DDB2_F1, ?DDB2_F2}, 5, 5) of
     {ok, _} ->
-      io:format("Table created with success\n\r "),
-      {ok, []};
+      io:format("Table created with success\n"),
+      {ok,[],{continue,receive_aws_sqs_msg}};
     {error,{_, DDB2_ERROR_ALREADY}} ->
-      io:format("Table already exists\n\r"),
-      {ok, []};
+      io:format("Table already exists\n"),
+      {ok,[],{continue,receive_aws_sqs_msg}};
     {error, _} ->
-      io:format("Table is not available, tha application won't start \n\r"),
+      io:format("Table is not available, tha server won't start \n"),
       {stop, data_base_not_available}
   end.
 
+handle_continue(receive_aws_sqs_msg, State) ->
+  %% Check the number of active message servers because the AWS can't handle
+  %% than 50 parallel request
+  [_,{active,ActiveMsgServers},_,_] = supervisor:count_children(?MSG_SUP),
+  %% Execute the aws request and create the message servers
+  ok = request_aws_sqs_message(?AWS_LIMIT_OPERATIONS - ActiveMsgServers),
+  {noreply, State, {continue,receive_aws_sqs_msg}}.
+
 handle_cast(run, State) ->
-  case erlcloud_sqs:receive_message(?AWS_SQS_NAME) of
-    [{messages, RespList}] -> process_msg(RespList);
-    _ -> none
-  end,
+  io:format("I'm still able to receive msgs\n"),
   {noreply, State};
 
 handle_cast(_Msg, State) ->
@@ -117,72 +134,41 @@ code_change(_OldVsn, State, _Extra) ->
 %% Internal functions
 %%====================================================================
 
-process_msg(RespList) ->
-  lists:foreach(fun( [ {body, Body}, _, _, _, _, _ ] ) ->
-                  % Decode body message
-                  #{?MAP_RECEIPT    := Receipt,
-                    ?MAP_USER_ID    := User,
-                    ?MAP_POST_QUEUE := PostQueue} =
-                  jsone:decode(erlang:list_to_binary(Body)),
+%%--------------------------------------------------------------------
+%% @doc This function request messages from AWS SQS and start a new gen_server
+%%      to handle the validation
+%%
+%% @param MaxMsgServers Current maximum number of supported messages by this
+%%        application and if greater than 10, it assigns the maximum supported
+%%        by ercloud that is 10.
+%% @end
+%%--------------------------------------------------------------------
+-spec request_aws_sqs_message(integer()) -> ok.
+request_aws_sqs_message(0) ->
+  ok;
 
-                  %% Verify your receipt first with the production URL;
-                  %% proceed to verify with the sandbox URL if you receive a
-                  %% 21007 status code. Following this approach ensures that
-                  %% you do not have to switch between URLs while your
-                  %% application is tested, reviewed by App Review, or live
-                  %% in the App Store.
-                  DecodedReceipt = validate_receipt(?APPLE_PRODUCTION, Receipt),
+request_aws_sqs_message(MaxMsgServers)
+  when MaxMsgServers > ?AWS_MAX_READ_MSGS ->
+  request_aws_sqs_message(?AWS_MAX_READ_MSGS );
 
-                  %% Check Status
-                  process_receipt(User, PostQueue, DecodedReceipt)
-                end,
-                RespList).
-
-validate_receipt(Url, Receipt) ->
-  %% Prepare message
-  Body    = jsone:encode( #{<<"receipt-data">> => Receipt} ),
-  Request = {Url, [], ?APPLE_CONTENT_TYPE, Body},
-
-  %% POST validation request and extract only JSON answer
-  {ok,{{"HTTP/1.1",200,"OK"},_,InAppResponse}} =
-                                          httpc:request(post, Request, [], []),
-  %% Decode received message
-  DecodedReceipt = jsone:decode(erlang:list_to_binary(InAppResponse)),
-
-  case DecodedReceipt of
-      #{<<"status">> := ?STATUS_SANDBOX} ->
-          io:format("\n\r Redirecting to Sandbox ~p \n", [DecodedReceipt]),
-          validate_receipt(?APPLE_SAND_BOX, Receipt);
-      _ ->
-          DecodedReceipt
-  end.
-
-%% Process the received receipt
-process_receipt(User, PostQueue,
-                #{<<"status">> := ?STATUS_OK} = DecodedReceipt) ->
-  %% Extract the transaction ID
-  #{<<"receipt">> :=
-        #{ <<"transaction_id">> := TransactionId} } = DecodedReceipt,
-
-  %% Check if the verification has already been done
-  Status = case erlcloud_ddb2:q(?DDB2_NAME, {?DDB2_F1, TransactionId, eq}, []) of
-    {ok, []}  -> io:format("First time validation for  ~p \n", [TransactionId]),
-                 ?OK;
-    {ok, [_]} -> io:format("Transaction ~p already validated \n", [TransactionId]),
-                 ?ERROR
-  end,
-
-  %% Save in the database
-  {ok, []} = erlcloud_ddb2:put_item( ?DDB2_NAME,
-                             [{?DDB2_F1, TransactionId},
-                              {?DDB2_F2, list_to_binary(integer_to_list(User))}]),
-
-  %% Prepare and send message to the post queue
-  Data = jsone:encode( #{?MAP_USER_ID  => User,
-                         ?MAP_TRANS_ID => TransactionId,
-                         ?MAP_STATUS   => Status }, [] ),
-  [{message_id,_}, {md5_of_message_body,_}] =
-             erlcloud_sqs:send_message(erlang:binary_to_list(PostQueue), Data);
-
-process_receipt(User, _, #{<<"status">> := Status}) ->
-  io:format("\n\r Receipt from User: ~p is Invalid ~p \n", [User, Status]).
+request_aws_sqs_message(MaxMsgServers)
+  when MaxMsgServers =< ?AWS_MAX_READ_MSGS ->
+  %% read messages
+  [{messages, RespList}] = erlcloud_sqs:receive_message(?AWS_SQS_NAME,
+                                                        all,
+                                                        MaxMsgServers),
+  %% Check body message is ok, and create servers to handling it
+  lists:foreach(
+    fun([ {body, Body}, {md5_of_body, RcvMd5}, _, _, _, _ ]) ->
+      %% Check message integrity
+      RcvMd5 = miniclip_msg:md5sum(Body),
+      %% Decode the body message to a map. It is execute before start the
+      %% the gen_server that will validate the receipt because in case of
+      %% invalid JASON message, it won't affect the others gen_servers that
+      %% were already running.
+      MapBody = jsone:decode(erlang:list_to_binary(Body)),
+      %% Start the gen_server that will process the message
+      {ok, _} = miniclip_msg_sup:process_msg(MapBody)
+    end,
+    RespList),
+  ok.

@@ -17,12 +17,12 @@
  {<<"lhttpc">>,{pkg,<<"lhttpc">>,<<"1.6.2">>},1},
  {<<"meck">>,{pkg,<<"meck">>,<<"0.8.13">>},0},
  {<<"observer_cli">>,
-  {git,"https://github.com/zhongwencool/observer_cli.git",
+  {git,"https://github.com/zhongwencool/observer_cli",
        {ref,"ab76a6aff30c3b4671fcf0807c1536037ecf0a72"}},
   0},
  {<<"recon">>,{pkg,<<"recon">>,<<"2.5.1">>},1},
  {<<"redbug">>,
-  {git,"https://github.com/massemanet/redbug.git",
+  {git,"https://github.com/massemanet/redbug",
        {ref,"c583d4567d1e2b8a540593ad0512559798d42565"}},
   0}]}.
 [

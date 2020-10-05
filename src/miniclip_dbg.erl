@@ -1,7 +1,7 @@
 %%%-------------------------------------------------------------------
 %%% Created : 03 Oct 2020 by Thiago Esteves <calori@gmail.com>
 %%%
-%%% @doc
+%%% @doc This is the debug module that helps
 %%%
 %%% @end
 %%%-------------------------------------------------------------------
@@ -16,11 +16,13 @@
 
 -include("miniclip.hrl").
 
+-dialyzer({nowarn_function, send_msg/1}).
+
 %%%===================================================================
 %%% Function exports
 %%%===================================================================
 
--export([clean/0, clean/1, test/0, load/0]).
+-export([apple_verification/0, load/1]).
 
 %%%===================================================================
 %%% Local Defines
@@ -112,50 +114,35 @@
   5QXhOam96TWpveU55QkZkR012UjAxVUlqc0tmUT09IjsiZW52aXJvbm1lbnQiID0gIlNhbmRib3giOyJwb2QiID0g
   IjEwMCI7InNpZ25pbmctc3RhdHVzIiA9ICIwIjt9">>).
 
--define(IN_APP_RECEIPT_INVALID, <<"Invalid">>).
-
 %%%===================================================================
 %%% API
 %%%===================================================================
-
-clean() ->
-  clean(?AWS_DEBUG_POST_QUEUE).
-
-clean(Name) ->
-  case erlcloud_sqs:receive_message(Name) of
-    [{messages, RespList}] -> delete_all_msgs(Name, RespList);
-    _ -> none
-  end,
-  ok.
-
-test() ->
+-spec apple_verification() -> ok.
+apple_verification() ->
   Request = {?APPLE_SAND_BOX, [], ?APPLE_CONTENT_TYPE,
              jsone:encode( #{<<"receipt-data">> => ?IN_APP_RECEIPT_OK_1} ) },
   Res = httpc:request(post, Request, [], []),
   io:format("\n\r ~p", [Res]),
   ok.
 
-load() ->
-  ReceiptList = [?IN_APP_RECEIPT_OK_1, ?IN_APP_RECEIPT_OK_2,
-                 ?IN_APP_RECEIPT_INVALID],
-  [ send_msg(Receip) || Receip <- ReceiptList],
+-spec load(integer()) -> ok.
+load(Messages) ->
+  ReceiptList = [?IN_APP_RECEIPT_OK_1, ?IN_APP_RECEIPT_OK_2],
+  List = lists:foldl(fun(_, X) -> X ++ ReceiptList end,
+                     [],
+                     lists:seq(1,Messages div 2)),
+  [ send_msg(Receip) || Receip <- List],
   ok.
 
 %%====================================================================
 %% Internal functions
 %%====================================================================
-
-delete_all_msgs(Name, RespList) ->
-  lists:foreach(fun(?AWS_SQS_MSG_BODY) ->
-                  ok = erlcloud_sqs:delete_message(Name, Handle),
-                  io:format(Name ++ " MSG: ~p deleted\n", [Body])
-                end,
-                RespList).
-
+-spec send_msg(string()) -> ok.
 send_msg(Receipt) ->
-  User = random:uniform(?MAX_USER_VAL),
+  User = rand:uniform(?MAX_USER_VAL),
   Data = jsone:encode( #{?MAP_USER_ID    => User,
                          ?MAP_RECEIPT    => Receipt,
                          ?MAP_POST_QUEUE => <<?AWS_DEBUG_POST_QUEUE>> }, [] ),
   [{message_id,_}, {md5_of_message_body,_}] =
-                                 erlcloud_sqs:send_message(?AWS_SQS_NAME, Data).
+                                 erlcloud_sqs:send_message(?AWS_SQS_NAME, Data),
+  ok.
