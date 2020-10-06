@@ -1,0 +1,89 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Resources": {
+        "TransactionIdTable": {
+            "Type": "AWS::DynamoDB::Table",
+            "Properties": {
+                "TableName": "TransactionIdTable",
+                "AttributeDefinitions": [
+                    {
+                        "AttributeName": "TransactionId",
+                        "AttributeType": "S"
+                    }
+                ],
+                "KeySchema": [
+                    {
+                        "AttributeName": "TransactionId",
+                        "KeyType": "HASH"
+                    }
+                ],
+                "ProvisionedThroughput": {
+                    "ReadCapacityUnits": "5",
+                    "WriteCapacityUnits": "5"
+                }
+            }
+        },
+        "ReceiptsSQS": {
+            "Type": "AWS::SQS::Queue",
+            "Properties": {
+                "QueueName": "ReceiptsSQS"
+            },
+            "DependsOn": [
+                "TransactionIdTable"
+            ]
+        },
+        "ResultsSQS": {
+            "Type": "AWS::SQS::Queue",
+            "Properties": {
+                "QueueName": "ResultsSQS"
+            }
+        },
+        "TransactionIdGroup": {
+            "Type": "AWS::IAM::Group",
+            "Properties": {
+                "GroupName": "TransactionIdGroup"
+            }
+        },
+        "ServerUser": {
+            "Type": "AWS::IAM::User",
+            "Properties": {
+                "UserName": "server_user",
+                "Groups": [
+                    {
+                        "Ref": "TransactionIdGroup"
+                    }
+                ]
+            }
+        },
+        "MiniclipValidationPolicy": {
+            "Type": "AWS::IAM::Policy",
+            "Properties": {
+                "PolicyName": "MiniclipValidationPolicy",
+                "PolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Sid": "ValidationPolicy0",
+                            "Effect": "Allow",
+                            "Action": [
+                                "dynamodb:PutItem",
+                                "sqs:DeleteMessage",
+                                "sqs:ReceiveMessage",
+                                "sqs:SendMessage"
+                            ],
+                            "Resource": "*"
+                        }
+                    ]
+                },
+                "Groups": [
+                    {
+                        "Ref": "TransactionIdGroup"
+                    }
+                ]
+            },
+            "DependsOn": [
+                "ServerUser"
+            ]
+        }
+    }
+}

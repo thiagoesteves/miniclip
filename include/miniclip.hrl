@@ -18,35 +18,52 @@
 -define(AWS_SECRET_ACCESS_KEY, "3btRbJztT83bipnOd0OxIuS0JkVnKG2cq0c9nf2f").
 -define(AWS_REGION,            "sa-east-1").
 %% AWS SQS names
--define(AWS_SQS_NAME,          "Miniclip").
--define(AWS_DEBUG_POST_QUEUE,  "ResultMiniclip").
-%% AWS General Definitions
--define(AWS_MAX_READ_MSGS,      10).
-%% AWS Errors
+-define(AWS_RECEIPT_SQS_NAME,  "ReceiptsSQS").
+-define(AWS_DEBUG_POST_QUEUE,  "ResultsSQS").
+
+%% AWS SQS Definitions
+-define(AWS_SQS_MAX_READ_MSGS,  10).
+-define(AWS_SQS_INVALID_SERVER, {aws_error,{http_error,400,"Bad Request",_}} ).
+
+%% AWS Errors for dynamoDB
 %% https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Programming.Errors.html
--define(AWS_MAX_THROUGHPUT_MSG, <<"ProvisionedThroughputExceededException">>).
--define(AWS_LIMIT_OPERATIONS,   48). %% 50 is the maximum
+-define(AWS_DDB2_CHECK_FAIL_MSG,     <<"ConditionalCheckFailedException">>).
+-define(AWS_DDB2_MAX_THROUGHPUT_MSG, <<"ProvisionedThroughputExceededException">>).
+-define(AWS_DDB2_LIMIT_OPERATIONS,   50). % Maximum parallel operation for dynamoDB
 
-% Body Messages read and post
--define(MAP_RECEIPT,    <<"receipt">>).
--define(MAP_USER_ID,    <<"user_id">>).
--define(MAP_POST_QUEUE, <<"post_queue">>).
--define(MAP_TRANS_ID,   <<"transaction_id">>).
--define(MAP_STATUS,     <<"status">>).
+%% DDB2 defines (names, fields, etc)
+-define(DDB2_NAME,     <<"TransactionIdTable">>).
+-define(DDB2_F1,       <<"TransactionId">>).
 
-%% Apple definitions
+%% See https://developer.apple.com/documentation/storekit/in-app_purchase/validating_receipts_with_the_app_store
 -define(APPLE_PRODUCTION,   "https://buy.itunes.apple.com/verifyReceipt").
 -define(APPLE_SAND_BOX,     "https://sandbox.itunes.apple.com/verifyReceipt").
 -define(APPLE_CONTENT_TYPE, "application/json").
 
--define(STATUS_OK,           0).
--define(STATUS_SANDBOX,      21007).
-%% Server code that requires another atempt to validate
--define(STATUS_ERR_SERVER_1, 21005).
--define(STATUS_ERR_SERVER_2, 21009).
+%% See https://developer.apple.com/documentation/appstorereceipts/status
+-define(APPLE_STATUS_OK,           0).
+-define(APPLE_STATUS_SANDBOX,      21007). % Redirect to sandbox
+-define(APPLE_STATUS_ERR_SERVER_1, 21005). % Server error, try again
+-define(APPLE_STATUS_ERR_SERVER_2, 21009). % Server error, try again
+-define(APPLE_STATUS_ERR_EXPIRED,  21006). % Valid, but expired
+-define(APPLE_STATUS_ERR_CORRUPTED,21002). % Receipt corrupted
 
-%% Return messages
+%% Return messages for the receipt validation
 -define(OK,    <<"OK">>).
 -define(ERROR, <<"INVALID">>).
+
+%% Http defines
+-define(HTTP_OK, {"HTTP/1.1",200,"OK"}).
+
+% Body Messages with all information needed to validate the receip
+-define(MAP_RECEIPT,     <<"receipt">>).
+-define(MAP_USER_ID,     <<"user_id">>).
+-define(MAP_POST_QUEUE,  <<"post_queue">>).
+-define(MAP_TRANS_ID,    <<"transaction_id">>).
+-define(MAP_STATUS,      <<"status">>).
+-define(MAP_RETRIES,     retries).
+-define(MAP_VALIDATION,  validation).
+-define(MAP_APPLE_RCPT,  apple_receipt).
+-define(MAP_RCPT_HANDLE, receipt_handle).
 
 -endif. %% miniclip

@@ -26,27 +26,14 @@
 -export([init/1,
          start_link/0,
          terminate/2,
-         handle_continue/2,
          handle_cast/2,
          handle_info/2,
          handle_call/3,
          code_change/3]).
 
-%% Public API export
--export([run/0]).
-
 %%%===================================================================
 %%% Global Defines
 %%%===================================================================
-
-%% DDB2 defines (names, fields, etc)
--define(DDB2_NAME,     <<"TransactionTable">>).
--define(DDB2_F1,       <<"TransactionID">>).
--define(DDB2_F2,       <<"UserID">>).
-
-%% DDB2 error defines
--define(DDB2_MSG_ALREADY, <<"Table already exists: ">>).
--define(DDB2_ERROR_ALREADY, <<?DDB2_MSG_ALREADY/binary, ?DDB2_NAME/binary>>).
 
 %% HTTP defines
 -define(MAX_SESSIONS,     200000).
@@ -55,16 +42,13 @@
 %% Supervisor that is handling the messages servers
 -define(MSG_SUP, miniclip_msg_sup).
 
+%% SLEEP for invalid read message server
+-define(INV_SERVER_SLEEP, 1000).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
 
-run() ->
-  gen_server:cast(?MODULE, run).
-
-%%--------------------------------------------------------------------
-%% @private
-%%--------------------------------------------------------------------
 start_link() ->
   gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
@@ -81,46 +65,29 @@ init([]) ->
   application:set_env(erlcloud, aws_secret_access_key, ?AWS_SECRET_ACCESS_KEY),
   application:set_env(erlcloud, aws_region, ?AWS_REGION),
 
-  %% Config HTTP options
-  ok = httpc:set_options([{max_sessions, ?MAX_SESSIONS},
-                          {pipeline_timeout, ?PIPELINE_TIMEOUT}], default),
+  %% Send message to itself to start the process of receiving messages
+  %% from AWS SQS
+  erlang:send(?MODULE, receive_aws_sqs_msg),
+  {ok,#{msg_counter => 0}}.
 
-  %% Create the database (or keep the one that already exist)
-  DDB2_ERROR_ALREADY = ?DDB2_ERROR_ALREADY,
-  case miniclip_erlcloud:ddb2_create_table( ?DDB2_NAME,
-                                            [{?DDB2_F1, s}, {?DDB2_F2, s}],
-                                            {?DDB2_F1, ?DDB2_F2}, 5, 5) of
-    {ok, _} ->
-      io:format("Table created with success\n"),
-      {ok,[],{continue,receive_aws_sqs_msg}};
-    {error,{_, DDB2_ERROR_ALREADY}} ->
-      io:format("Table already exists\n"),
-      {ok,[],{continue,receive_aws_sqs_msg}};
-    {error, _} ->
-      io:format("Table is not available, tha server won't start \n"),
-      {stop, data_base_not_available}
-  end.
-
-handle_continue(receive_aws_sqs_msg, State) ->
+handle_info(receive_aws_sqs_msg, State = #{msg_counter := MsgCounter}) ->
   %% Check the number of active message servers because the AWS can't handle
   %% than 50 parallel request
-  [_,{active,ActiveMsgServers},_,_] = supervisor:count_children(?MSG_SUP),
+  [_,{active,Active},_,_] = supervisor:count_children(?MSG_SUP),
   %% Execute the aws request and create the message servers
-  ok = request_aws_sqs_message(?AWS_LIMIT_OPERATIONS - ActiveMsgServers),
-  {noreply, State, {continue,receive_aws_sqs_msg}}.
+  RcvMsg = request_aws_sqs_message(?AWS_DDB2_LIMIT_OPERATIONS - Active),
+  %% Restart the cycle
+  erlang:send(?MODULE, receive_aws_sqs_msg),
+  {noreply, State#{msg_counter => MsgCounter + RcvMsg}};
 
-handle_cast(run, State) ->
-  io:format("I'm still able to receive msgs\n"),
-  {noreply, State};
+handle_info(_Info, State) ->
+  {noreply, State}.
 
 handle_cast(_Msg, State) ->
   {noreply, State}.
 
 handle_call(_Msg, _From, State) ->
   {reply, ok, State}.
-
-handle_info(_Info, State) ->
-  {noreply, State}.
 
 %% @private
 terminate(_Reason, _State) ->
@@ -140,35 +107,68 @@ code_change(_OldVsn, State, _Extra) ->
 %%
 %% @param MaxMsgServers Current maximum number of supported messages by this
 %%        application and if greater than 10, it assigns the maximum supported
-%%        by ercloud that is 10.
+%%        by aws sqs that is 10.
 %% @end
 %%--------------------------------------------------------------------
--spec request_aws_sqs_message(integer()) -> ok.
+-spec request_aws_sqs_message(integer()) -> integer().
 request_aws_sqs_message(0) ->
-  ok;
+  0;
 
 request_aws_sqs_message(MaxMsgServers)
-  when MaxMsgServers > ?AWS_MAX_READ_MSGS ->
-  request_aws_sqs_message(?AWS_MAX_READ_MSGS );
+  when MaxMsgServers > ?AWS_SQS_MAX_READ_MSGS ->
+  request_aws_sqs_message(?AWS_SQS_MAX_READ_MSGS );
 
 request_aws_sqs_message(MaxMsgServers)
-  when MaxMsgServers =< ?AWS_MAX_READ_MSGS ->
-  %% read messages
-  [{messages, RespList}] = erlcloud_sqs:receive_message(?AWS_SQS_NAME,
-                                                        all,
-                                                        MaxMsgServers),
+  when MaxMsgServers =< ?AWS_SQS_MAX_READ_MSGS ->
+  %% read messages (If no server is available, an exception is raised)
+  MessageList = try erlcloud_sqs:receive_message(?AWS_RECEIPT_SQS_NAME,
+                                                 all,
+                                                 MaxMsgServers) of
+    [{messages, List}] -> List
+  catch
+    _:?AWS_SQS_INVALID_SERVER ->
+        io:format("The AWQ server is not accessible"),
+        timer:sleep(?INV_SERVER_SLEEP),
+        %% return no messages available
+        []
+  end,
+
   %% Check body message is ok, and create servers to handling it
   lists:foreach(
-    fun([ {body, Body}, {md5_of_body, RcvMd5}, _, _, _, _ ]) ->
+    fun([ {body, Body}, {md5_of_body, RcvMd5}, _,
+          {receipt_handle,HandleMsg}, _, _ ]) ->
       %% Check message integrity
-      RcvMd5 = miniclip_msg:md5sum(Body),
-      %% Decode the body message to a map. It is execute before start the
-      %% the gen_server that will validate the receipt because in case of
-      %% invalid JASON message, it won't affect the others gen_servers that
-      %% were already running.
-      MapBody = jsone:decode(erlang:list_to_binary(Body)),
-      %% Start the gen_server that will process the message
-      {ok, _} = miniclip_msg_sup:process_msg(MapBody)
+      case miniclip_msg:md5sum(Body) of
+        RcvMd5 ->
+          %% Decode the body message to a map. It is execute before start the
+          %% the gen_server that will validate the receipt because in case of
+          %% invalid JASON message, it won't affect the others gen_servers that
+          %% were already running.
+          create_miniclip_msg_server(miniclip_msg:maybe_json_decode(Body),
+                                     HandleMsg);
+        _ -> % Corrputed message, discard
+            none
+      end
     end,
-    RespList),
+    MessageList),
+  length(MessageList).
+
+%%--------------------------------------------------------------------
+%% @doc This function create the servers that will process the msg
+%%      If the json is invalid, no messages are create
+%%
+%% @param Json return
+%%        Message Handle to be added to the json decoded map
+%% @end
+%%--------------------------------------------------------------------
+-spec create_miniclip_msg_server( {ok, map()} | {error, any()}, string()) -> ok.
+create_miniclip_msg_server({error, _}, _) ->
+  %% Invalid json, discard message
+  ok;
+
+create_miniclip_msg_server({ok, MapBody}, Handle) ->
+  {ok, _} = miniclip_msg_sup:process_msg(MapBody#{?MAP_RCPT_HANDLE => Handle}),
   ok.
+
+
+

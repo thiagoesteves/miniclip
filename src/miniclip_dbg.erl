@@ -1,7 +1,8 @@
 %%%-------------------------------------------------------------------
 %%% Created : 03 Oct 2020 by Thiago Esteves <calori@gmail.com>
 %%%
-%%% @doc This is the debug module that helps
+%%% @doc This is the debug module that helps to load messsages and to validate
+%%%      at apple website
 %%%
 %%% @end
 %%%-------------------------------------------------------------------
@@ -140,9 +141,9 @@ load(Messages) ->
 -spec send_msg(string()) -> ok.
 send_msg(Receipt) ->
   User = rand:uniform(?MAX_USER_VAL),
-  Data = jsone:encode( #{?MAP_USER_ID    => User,
-                         ?MAP_RECEIPT    => Receipt,
-                         ?MAP_POST_QUEUE => <<?AWS_DEBUG_POST_QUEUE>> }, [] ),
+  Data = jsone:encode( #{<<"user_id">>    => User,
+                         <<"receipt">>    => Receipt,
+                         <<"post_queue">> => <<?AWS_DEBUG_POST_QUEUE>> }, [] ),
   [{message_id,_}, {md5_of_message_body,_}] =
-                                 erlcloud_sqs:send_message(?AWS_SQS_NAME, Data),
+                                 erlcloud_sqs:send_message(?AWS_RECEIPT_SQS_NAME, Data),
   ok.

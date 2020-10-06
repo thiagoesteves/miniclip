@@ -52,13 +52,8 @@ init([]) ->
 %% @param Body Received receit in the string format
 %% @end
 %%--------------------------------------------------------------------
--spec process_msg(string()) -> { ok , undefined | pid() }.
+-spec process_msg(map()) -> { ok , undefined | pid() }.
 process_msg(Body) ->
-%%   ChildSpecs = #{ id => make_ref(),
-%%                   start => {?MSG_CONSUMER_NAME, start_link, [Body]},
-%%                   restart => transient,
-%%                   shutdown => brutal_kill,
-%%                   type => worker },
   {ok, Pid} = supervisor:start_child(?MODULE, [Body]),
   {ok, Pid}.
 
