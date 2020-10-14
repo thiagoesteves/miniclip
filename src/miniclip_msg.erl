@@ -86,7 +86,6 @@ handle_info(apple_validation, #{?MAP_RECEIPT := ReceiptToValidate,
       erlang:send(self(), validate_receipt),
       {noreply, State#{?MAP_APPLE_RCPT => Receipt}};
     { error, _ } -> % Try again ...
-      io:format("A"),
       erlang:send_after(?APPLE_WAIT_TIME, self(), apple_validation),
       {noreply, State#{?MAP_RETRIES => Retries - 1}}
   end;
@@ -100,16 +99,14 @@ handle_info(validate_receipt, #{ ?MAP_APPLE_RCPT :=
   case erlcloud_ddb2:put_item(?DDB2_NAME, [{?DDB2_F1, TransactionId}], [
     { condition_expression, <<"attribute_not_exists(#id)">> },
     { expression_attribute_names, [{<<"#id">>, ?DDB2_F1}] } ]) of
-    {ok, []} -> %io:format("First time validation for  ~p \n", [TransactionId]),
-               %% Send message to send the results
+    {ok, []} -> %% Send message to send the results
                erlang:send(self(), send_to_post_queue),
                {noreply, State#{?MAP_VALIDATION => ?OK}};
-    {error, {?AWS_DDB2_CHECK_FAIL_MSG,_}} -> %io:format("Transaction ~p already validated \n", [TransactionId]),
+    {error, {?AWS_DDB2_CHECK_FAIL_MSG,_}} ->
                %% Send message to send the results
                erlang:send(self(), send_to_post_queue),
                {noreply, State};
     {error,{?AWS_DDB2_MAX_THROUGHPUT_MSG,_}} ->
-               io:format("T"),
                %% Try to validate again later (maximum throughput achieved)
                erlang:send_after(?DDB2_PUT_ITEM_WAIT_TIME, self(), validate_receipt),
                {noreply, State#{?MAP_RETRIES => Retries - 1}}
@@ -157,7 +154,6 @@ handle_info(delete_processed_msg, #{?MAP_RCPT_HANDLE := Handle,
     ok -> % Finish, all OK
           {stop, normal, State};
     _  -> % Error, try again later
-          io:format("D"),
           erlang:send_after(?DELETE_WAIT_TIME, self(), delete_processed_msg),
           {noreply, State#{?MAP_RETRIES => Retries - 1}}
   end;

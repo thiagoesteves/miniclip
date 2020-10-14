@@ -14,8 +14,8 @@
 %%%===================================================================
 
 %% AWS Credential definitions
--define(AWS_ACCESS_KEY_ID,     "AKIAIBEF4BTNHA6TREMA").
--define(AWS_SECRET_ACCESS_KEY, "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").
+-define(AWS_ACCESS_KEY_ID,     "XXXXXXXX").
+-define(AWS_SECRET_ACCESS_KEY, "XXXXXXXX").
 -define(AWS_REGION,            "sa-east-1").
 %% AWS SQS names
 -define(AWS_RECEIPT_SQS_NAME,  "ReceiptsSQS").

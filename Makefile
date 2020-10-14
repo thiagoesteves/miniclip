@@ -1,7 +1,7 @@
 .PHONY: all test clean compile run check
 	
 all:
-	ERL_FLAGS=" -args_file ${PWD}/config/vm.args.src" rebar3 shell --apps miniclip
+	ulimit -n 4096; ERL_FLAGS=" -args_file ${PWD}/config/vm.args.src" rebar3 shell --apps miniclip
 	
 test:
 	rebar3 ct --cover && rebar3 cover --verbose

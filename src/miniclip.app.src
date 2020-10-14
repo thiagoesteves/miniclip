@@ -1,5 +1,6 @@
 {application, miniclip,
- [{description, "An OTP application"},
+ [{description, "Server Application for Miniclip Challenge"},
+  {vsn, "git"},
   {vsn, "1.0.0"},
   {registered, []},
   {mod, {miniclip_app, []}},
@@ -15,5 +16,5 @@
   {modules, []},
 
   {licenses, ["Apache 2.0"]},
-  {links, []}
+  {links, [{"Github", "https://github.com/thiagoesteves/miniclip"}]}
  ]}.
