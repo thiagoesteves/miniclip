@@ -1,3 +1,7 @@
+[![Build Status](https://secure.travis-ci.org/thiagoesteves/miniclip.svg?branch=main)](http://travis-ci.org/thiagoesteves/miniclip)
+[![Coverage Status](https://coveralls.io/repos/github/thiagoesteves/miniclip/badge.svg?branch=main)](https://coveralls.io/github/thiagoesteves/miniclip?branch=main)
+[![Erlant/OTP Release](https://img.shields.io/badge/Erlang-OTP--23.0-green.svg)](https://github.com/erlang/otp/releases/tag/OTP-23.0)
+
 # miniclip
 This code is the result of the interview challenge from Miniclip
 
